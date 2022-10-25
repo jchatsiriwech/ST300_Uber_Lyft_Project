@@ -1,0 +1,158 @@
+---
+title: "Exploratory Data Analysis Part I"
+author: "Jakraya (Park) Chatsiriwech - Group 4"
+date: "2022-10-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objectives
+
+This is the first exploratory data analysis about the dataset. The primary objective is to examine the relevant variables that would be beneficial in determining the price of Uber and Lyft in Boston, potentially contingent on weather conditions.
+
+We also aim to formulate questions that we can answer using the dataset, which will later serve as the primary objective of the study.
+
+
+## Read the data into R
+
+```{r, message = FALSE}
+library(readr)
+uber_lyft <- read_csv(file = "rideshare_kaggle.csv", col_names = TRUE)
+```
+
+
+## First view of the dataset
+
+```{r}
+# first 6 observations
+head(uber_lyft)
+
+# structure of the data
+str(uber_lyft)
+
+# brief summary statistics of each variable
+summary(uber_lyft)
+
+attach(uber_lyft)
+table(timezone)
+table(source)
+table(destination)
+table(source, destination)  # interesting to see that we never go from Back Bay to Beacon Hill etc
+table(product_id)   # Lyft cabs give meaningful categories, while Uber's code needs decoding into meaningful text
+table(name)
+table(surge_multiplier)  # surge pricing is applied in times of high demand
+hist(apparentTemperature)
+table(short_summary)
+table(icon)
+which((visibility - visibility.1) != 0)
+table(uvIndex)
+```
+
+The dataset consists of nearly 700,000 observations with 57 variables. However, not all are relevant. The following list are discarded in the first screen as it doesn't convey much information about the price of the ride.
+
+1) `id` -- the unique identifier has no meaningful interpretation
+2) `timestamp` -- the Unix timestamp adds no other information to the `hour`, `day`, and `month` columns that we already had.
+3) `datetime` -- precise time is not important given the `hour`, `day` and `month`
+4) `timezone` -- all observations are in the `America/New_York` timezone
+5) `latitude` -- exact location is irrelevant in predicting price of cabs given `source` and `destination` have already been provided
+6) `longitude` -- exact location is irrelevant in predicting price of cabs given `source` and `destination` have already been provided
+7) `apparentTemperature` -- feels like temperature is not needed given the actual temperature
+8) `windGustTime` -- without further context in terms of how long the gust lasts, Unix timestamp of wind gust might be irrelevant
+9) other temperature statistics -- high/low/min/max temp, apparent high/low/min/max time and their corresponding time
+10) `visibility.1` -- this gives exactly the same data as the `visibility` column
+11) other weather related statistics -- sunrise/sunset time, moon phase, precipitation intensity max, UV index time
+
+
+## Filtering out irrelevant columns from the first screening
+
+```{r, message = FALSE}
+library(dplyr)
+uber_lyft_cleaned <- uber_lyft |> 
+  select(-c(1:2, 6:7, 16:17, 19, 27, 29:36, 43, 45:57))
+
+# preview the screened data
+str(uber_lyft_cleaned)
+```
+
+## Convert categorical data into factor levels
+
+```{r}
+uber_lyft_cleaned$month <- factor(uber_lyft_cleaned$month)
+uber_lyft_cleaned$source <- factor(uber_lyft_cleaned$source)
+uber_lyft_cleaned$destination <- factor(uber_lyft_cleaned$destination)
+uber_lyft_cleaned$cab_type <- factor(uber_lyft_cleaned$cab_type)
+uber_lyft_cleaned$product_id <- factor(uber_lyft_cleaned$product_id)
+uber_lyft_cleaned$name <- factor(uber_lyft_cleaned$name)
+uber_lyft_cleaned$surge_multiplier <- factor(uber_lyft_cleaned$surge_multiplier)
+uber_lyft_cleaned$short_summary <- factor(uber_lyft_cleaned$short_summary)
+uber_lyft_cleaned$long_summary <- factor(uber_lyft_cleaned$long_summary)
+uber_lyft_cleaned$icon<- factor(uber_lyft_cleaned$icon)
+uber_lyft_cleaned$uvIndex<- factor(uber_lyft_cleaned$uvIndex)
+
+str(uber_lyft_cleaned)
+
+# inspecting the short_summary, long_summary and icon columns
+attach(uber_lyft_cleaned)
+table(short_summary, icon)   
+table(short_summary, long_summary)  
+table(short_summary, cloudCover)
+table(short_summary, uvIndex)
+
+# inspect Uber's product id
+table(product_id, name)   # there is a one-to-one bijection between the two
+
+# check for NAs in price
+sum(is.na(uber_lyft_cleaned$price) == TRUE)
+
+for (i in 1:ncol(uber_lyft_cleaned)) {
+  if (sum(is.na(uber_lyft_cleaned[, i])) >= 1) {
+    print(paste(names(uber_lyft_cleaned)[i], "contains NAs", sep = " "))
+  } else {
+    print("all good")
+  }
+}
+```
+
+From further inspection, `short summary` contains all of the useful information encoded in `long_summary` and `icon`. So, we decided to discard the 2 latter columns.
+
+In addition, there is a bijection between `product_id` and `name`, so we will keep the `name` column as it is easier to interpret and discard the former. 
+
+There are a number of missing fare prices, so we checked if there is other columns with missing entries. It turns out that the only column with missing data is the `price` column, hence we also remove those entries in the next stage.
+
+## Final data cleaning for the first stage
+
+```{r}
+# remove the long_summary and icon columns
+uber_lyft_cleaned <- uber_lyft_cleaned[, -c(14,21)]
+
+# remove the product_id column
+uber_lyft_cleaned <- uber_lyft_cleaned[, -7]
+
+# remove observations with missing prices
+uber_lyft_cleaned <- uber_lyft_cleaned[is.na(uber_lyft_cleaned$price) == FALSE,]
+
+str(uber_lyft_cleaned)
+```
+
+## Exporting the data frame to a csv file for later use
+
+Since the write_csv() function overwrite factors to characters, we need to convert all factor levels into characters and specify the `stringsAsFactors = TRUE` in read.csv() when called.
+
+```{r}
+# convert all factors into characters
+uber_lyft_cleaned$month <- as.character(uber_lyft_cleaned$month)
+uber_lyft_cleaned$source <- as.character(uber_lyft_cleaned$source)
+uber_lyft_cleaned$destination <- as.character(uber_lyft_cleaned$destination)
+uber_lyft_cleaned$cab_type <- as.character(uber_lyft_cleaned$cab_type)
+uber_lyft_cleaned$name <- as.character(uber_lyft_cleaned$name)
+uber_lyft_cleaned$surge_multiplier <-   as.character(uber_lyft_cleaned$surge_multiplier)
+uber_lyft_cleaned$short_summary <- as.character(uber_lyft_cleaned$short_summary)
+uber_lyft_cleaned$uvIndex<- as.character(uber_lyft_cleaned$uvIndex)
+
+# write a csv file for the cleaned data
+write.csv(uber_lyft_cleaned, file = "uber_lyft_cleaned_v1.csv", row.names = FALSE, col.names = TRUE)
+```
+

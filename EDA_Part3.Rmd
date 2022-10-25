@@ -1,0 +1,89 @@
+---
+title: "Exploratory Data Analysis Part III"
+author: "Jakraya (Park) Chatsiriwech - Group 3"
+date: "2022-10-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read the data into R
+
+```{r}
+# use read.csv() as read_csv() has no stringsAsFactors argument
+data <- read.csv(file = "uber_lyft_cleaned_v2.csv", header = TRUE, stringsAsFactors = TRUE)
+
+str(data)
+```
+
+# Inspecting Data by Date
+
+```{r}
+# By date
+for (i in 1:3) {
+  hist(as.numeric(data[,i]), main = paste("Histogram of", names(data)[i], sep = " "))
+}  # might be useful to convert day into Monday, Tuesday etc
+```
+
+It is evident from the histogram that data are clustered in groups of 5 days, so it might be useful to visualise the trips by which day of the week it is recorded.
+
+```{r}
+data[,25] <- character()
+names(data)[25] <- "DayoftheWeek"
+for (i in 1:nrow(data)) {
+  if (data$month[i] == "November") {
+    date <- data$day[i]
+    if (date %in% c(4, 11, 18, 25)) {data[i,25] <- "Sunday"}
+    if (date %in% c(5, 12, 19, 26)) {data[i,25] <- "Monday"}
+    if (date %in% c(6, 13, 20, 27)) {data[i,25] <- "Tuesday"}
+    if (date %in% c(7, 14, 21, 28)) {data[i,25] <- "Wednesday"}
+    if (date %in% c(1, 8, 15, 22, 29)) {data[i,25] <- "Thursday"}
+    if (date %in% c(2, 9, 16, 23, 30)) {data[i,25] <- "Friday"}
+    if (date %in% c(3, 10, 17, 24)) {data[i,25] <- "Saturday"}
+  }
+  else {  # it must be December
+    date <- data$day[i]
+    if (date %in% c(2, 9, 16, 23, 30)) {data[i,25] <- "Sunday"}
+    if (date %in% c(3, 10, 17, 24, 31)) {data[i,25] <- "Monday"}
+    if (date %in% c(4, 11, 18, 25)) {data[i,25] <- "Tuesday"}
+    if (date %in% c(5, 12, 19, 26)) {data[i,25] <- "Wednesday"}
+    if (date %in% c(6, 13, 20, 27)) {data[i,25] <- "Thursday"}
+    if (date %in% c(7, 14, 21, 28)) {data[i,25] <- "Friday"}
+    if (date %in% c(1, 8, 15, 22, 29)) {data[i,25] <- "Saturday"}
+  }
+}
+
+# add a column to indicate whether it is a weekday or a weekend
+data[,26] <- character()
+names(data)[26] <- "Weekday"
+for (i in 1:nrow(data)) {
+  if (data$DayoftheWeek[i] %in% c("Saturday", "Sunday")) {
+    data[i, 26] <- "Weekend"
+  } else {
+    data[i, 26] <- "Weekday"
+  }
+}
+```
+
+It might also help to categorise hours into 'peak' and 'off-peak'.
+According to [Tomtom's Boston traffic index in 2019](https://www.tomtom.com/traffic-index/boston-traffic/), rush (peak) hours refer to 6am - 10am and 3pm - 7pm on weekdays
+
+```{r}
+data[,27] <- character()
+names(data)[27] <- "Peak"
+for (i in 1:nrow(data)) {
+  if (data$Weekday[i] == "Weekday" & data$hour[i] %in% c(6:9, 14:18)) {
+    data[i, 27] <- "Peak"
+  } else {
+    data[i, 27] <- "Offpeak"
+  }
+}
+
+str(data)
+
+# export the dataframe
+write.csv(data, file = "uber_lyft_cleaned_v3.csv", row.names = FALSE, col.names = TRUE)
+```
+

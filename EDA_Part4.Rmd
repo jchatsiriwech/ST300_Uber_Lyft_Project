@@ -1,0 +1,150 @@
+---
+title: "Exploratory Data Analysis Part IV"
+author: "Jakraya (Park) Chatsiriwech - Group 3"
+date: "2022-10-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read the data into R
+
+```{r}
+data <- read.csv(file = "uber_lyft_cleaned_v3.csv", header = TRUE, stringsAsFactors = TRUE)
+
+str(data)
+
+for (i in 1:ncol(data)) {
+  if (sum(is.na(data[, i])) >= 1) {
+    print(paste(names(data)[i], "contains NAs", sep = " "))
+  } else {
+    print("all good")
+  }
+}
+```
+
+Since we already had the `DayoftheWeek` and `Peak` columns, the `hour` and `day` columns are redundant, so we will remove it. Then, we also rearrange the columns so that the last 3 columns are in front
+
+```{r}
+data <- data[, -(1:2)]
+data <- data[, c(23:25, 1:22)]
+```
+
+
+# Inspecting the data by cab type
+
+In EDA Part 2, we showed that Lyft is more expensive than Uber, on average. There also seems to be clusters among cab types: `normal`, `luxury` and `shared`.
+
+```{r}
+library(ggplot2)
+ggplot(data = data, aes(x = price, fill = name, color = cab_type)) +
+  geom_boxplot()
+```
+
+For Lyft, 3 clusters are evident:
+1. Regular Lyft: `Lyft` and `Lyft XL`
+2. Luxury Lyft: `Lux`, `Lux Black` and `Lux Black XL`
+3. Shared Lyft: `Shared`
+
+Similarly for Uber, 3 clusters are also evident:
+1. Regular Uber: `UberX`, `UberXL`, `WAV`
+2. Luxury Uber: `Black` and `Black SUV`
+3. Shared Uber: `UberPool`
+
+As there seem to be a mapping between cab types, we will add another column to identify types of cabs: `Regular`, `Luxury` and `Shared`
+
+```{r}
+data[,26] <- character()
+names(data)[26] <- "Cab_Name"
+for (i in 1:nrow(data)) {
+  regular <- c("Lyft", "Lyft XL", "UberX", "UberXL", "WAV")
+  shared <- c("Shared", "UberPool")
+  if (data$name[i] %in% regular) {
+    data[i, 26] <- "Regular"
+  } else if (data$name[i] %in% shared) {
+    data[i, 26] <- "Shared"
+  } else {data[i, 26] <- "Luxury"}
+}
+
+str(data)
+```
+
+# Inspecting the data by `short_summary`
+
+In EDA Part 2, we have seen that the state of weather doesn't seem to have any influence on prices. In fact, there are many similar descriptions of weather, so we might want to group them.
+
+```{r}
+library(ggplot2)
+ggplot(data = data, aes(x = price, fill = short_summary)) +
+  geom_boxplot() +
+  xlim(0, 30)  # zoom into the boxes part
+#  geom_point(data = price_weather, aes(x = avg_price, fill = short_summary), color = "red")
+
+library(dplyr)
+data %>% group_by(short_summary) %>% summarize(avg_price = mean(price),
+                                               median_price = median(price))
+
+table(data$short_summary, data$precipProbability)
+ggplot(data = data, aes(x = precipProbability, fill = short_summary)) + geom_bar()
+```
+
+Based on weather types, we will group the short_summary into 4 groups:
+1. Clear: `Clear`, `Possible Drizzle`
+2. Cloudy: `Foggy`, `Partly Cloudy`, `Mostly Cloudy`, `Overcast`
+3. Rainy: `Drizzle`, `Light Rain`, `Rain`
+
+```{r}
+data[,27] <- character()
+names(data)[27] <- "Weather"
+
+for (i in 1:nrow(data)) {
+  clear <- c("Clear")
+  rainy <- c("Drizzle", "Light Rain", "Rain")
+  if (data$short_summary[i] %in% clear) {
+    data[i, 27] <- "Clear"
+  } else if (data$short_summary[i] %in% rainy) {
+    data[i, 27] <- "Rainy"
+  } else {data[i, 27] <- "Cloudy"}
+}
+
+str(data)
+
+# replace the short_summary with weather and name with Cab_Name
+data <- data[, c(1:7, 26, 9:12, 27, 14:25)] 
+
+# preciIntensity and preciProbability are highly correlated, so remove preciProbability
+# windSpeed and windGust are highly correlated, so remove windGust as it is a sudden/abrupt high speed wind rather than a sustained speed
+data <- data[, -c(15, 18)]
+
+# convert all characters to factors level
+data$Cab_Name <- as.factor(data$Cab_Name)
+data$Weather <- as.factor(data$Weather)
+
+cor(data$price, data[,c(10:12, 14:23)])
+library(corrplot)
+corrplot(corr = cor(data[, c(9:12, 14:23)]))
+
+# also remove uvIndex and ozone as doesn't seem to have any implication on price
+# dewPoint and temperature is highly correlated, so remove dewPoint
+data <- data[, -c(18, 22:23)]
+
+ggplot(data = data, aes(x = cloudCover, fill = Weather)) + 
+  geom_boxplot()   # cloud cover tends to be highly correlated with Weather -- so remove them
+
+corrplot(corr = cor(data[, c(9:12, 14:20)]))
+
+# also remove windBearing and pressure as doesn't intuitively explain things
+data <- data[, -c(18:20)]
+
+corrplot(corr = cor(data[, c(9:12, 14:17)]))
+# visibility tends to be highly negatively correlated with humidity -- removing humidity??
+```
+
+# Export the dataframe to a csv file
+
+```{r}
+write.csv(data, file = "uber_lyft_cleaned_v4.csv", row.names = FALSE, col.names = TRUE)
+```
+

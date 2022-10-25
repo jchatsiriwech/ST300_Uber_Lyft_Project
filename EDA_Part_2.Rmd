@@ -1,0 +1,105 @@
+---
+title: "Exploratory Data Analysis Part II"
+author: "Jakraya (Park) Chatsiriwech - Group 4"
+date: "2022-10-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Objectives
+
+The main aim for the second part of exploratory data analysis is to explore potential interesting relationships between variables. In doing so, further data cleaning and formatting might be required.
+
+# Read the data into R
+
+```{r}
+# use read.csv() as read_csv() has no stringsAsFactors argument
+data <- read.csv(file = "uber_lyft_cleaned_v1.csv", header = TRUE, stringsAsFactors = TRUE)
+
+# quick glance at the data
+head(data)
+summary(data)
+str(data)
+```
+
+# Formatting: convert columns into factors
+
+```{r}
+data$month <- as.factor(data$month)
+# rename factors level to November and December
+levels(data$month) <- c("November", "December")
+
+data$surge_multiplier <- as.factor(data$surge_multiplier)
+data$uvIndex <- as.factor(data$uvIndex)
+```
+
+
+``` {r}
+# By location
+library(ggplot2)
+ggplot(data = data, aes(x = price, fill = source)) +
+  geom_boxplot()
+ggplot(data = data, aes(x = distance, fill = source)) +
+  geom_boxplot()
+
+ggplot(data = data, aes(x = price, fill = destination)) +
+  geom_boxplot()
+ggplot(data = data, aes(x = distance, fill = destination)) +
+  geom_boxplot()
+
+# By cab type / name
+ggplot(data = data, aes(x = price, fill = cab_type)) +
+  geom_boxplot()   # lyft is more expensive on average
+
+ggplot(data = data, aes(x = price, fill = name, color = cab_type)) +
+  geom_boxplot()   # lyft clusters: luxury, lyft & XL, shared
+# uber clusters: black, uberx & XL & WAV, uberpool
+
+# price, surge multiplier and distance
+ggplot(data = data, aes(x = distance, y = price, color = surge_multiplier)) +
+  geom_point()
+
+# surge multiplier and hour / day
+ggplot(data = data, aes(x = hour, y = surge_multiplier, color = day)) +
+  geom_point()
+
+# short summary
+table(data$short_summary)   # group into clear, cloudy (mostly cloudy, partly cloudy, overcast, foggy), drizzle (possible drizzle, drizzle), rain (light rain, rain)
+attach(data)
+ggplot(data = data[which(short_summary == "Rain" | short_summary == "Light Rain"), ], aes(y = price, color = short_summary)) +
+  geom_boxplot()   # can group rain and light rain together
+
+ggplot(data = data, aes(y = price, color = short_summary)) +
+  geom_boxplot()    # strange that weather doesn't seem to affect price
+ggplot(data = data, aes(x = distance, y = price, color = short_summary)) +
+  geom_point()
+
+# correlation matrix between weather data
+cor_matrix <- cor(data$price, data[,c(11, 13:22, 24)])
+cor_matrix[1,]
+
+# correlation between price and weather data
+ggplot(data = data, aes(x = temperature, y = price, color = distance)) + geom_point()
+#ggplot(data = data, aes(x = precipIntensity, y = price)) + geom_point()
+#ggplot(data = data, aes(x = precipIntensity, y = price)) + geom_point()
+
+library(corrplot)
+corrplot(corr = cor(data[, c(1:2, 8:9, 11, 13:22, 24)]))
+
+# high correlation between precipaIntensity and precipProbablity + windSpeed and WindGust
+# very weak correlation between weather data and price
+
+ggplot(data = data, aes(x = price, fill = uvIndex)) +
+  geom_boxplot()
+```
+
+# Export the dataframe
+
+```{r}
+# export the file
+write.csv(data, file = "uber_lyft_cleaned_v2.csv", row.names = FALSE, col.names = TRUE)
+```
+

@@ -1,0 +1,64 @@
+---
+title: "Eexploratory Data Analysis Part V"
+author: "Jakraya (Park) Chatsiriwech - Group 3"
+date: "2022-10-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read data into R
+
+```{r}
+data <- read.csv(file = "uber_lyft_cleaned_v4.csv", header = TRUE, stringsAsFactors = TRUE)
+
+str(data)
+head(data, 20)
+summary(data)
+```
+
+# Check for missing data
+
+```{r}
+for (i in 1:ncol(data)) {
+  if (sum(is.na(data[, i])) >= 1) {
+    print(paste(names(data)[i], "contains NAs", sep = " "))
+  } else {
+    print("all good")
+  }
+}
+```
+
+Skeleton model: price on distance, peak, surge_multiplier, cab_type, Cab_Name, Weather
+
+So, remove `DayoftheWeek`, `month`, `source`, `destination`
+
+```{r}
+data <- data[, -c(1, 4:6)]
+```
+
+Rearrange the columns so that price and distance are the first 2 columns in the dataset.
+
+```{r}
+data <- data[, c(5:6, 1:4, 7:13)]
+str(data)
+```
+
+# Investigate the relationship between cab_type and surge_multiplier
+
+```{r}
+ggplot(data, aes(x = surge_multiplier, fill = cab_type)) +
+  geom_bar(aes(y = ..count../sum(..count..)), position = "dodge")
+
+table(data$cab_type, data$surge_multiplier)
+table(data$Peak, data$surge_multiplier, data$cab_type)
+```
+
+# Export to a dataframe
+
+```{r}
+write.csv(data, file = "uber_lyft_cleaned_vF.csv", row.names = FALSE, col.names = TRUE)
+```
+
