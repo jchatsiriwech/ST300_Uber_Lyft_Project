@@ -1,0 +1,110 @@
+---
+title: "Model Fitting Part 4"
+author: "Jakraya (Park) Chatsiriwech - Group 4"
+date: "2022-10-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read data into R
+
+```{r}
+data <- read.csv(file = "uber_lyft_cleaned_vF.csv", header = TRUE, stringsAsFactors = TRUE)
+
+# Standaridize by surge_multiplier and transform into log
+data[,7] <- data$price / data$surge_multiplier
+names(data)[7] <- "std_price"
+hist(data$std_price)
+data[,8] <- log(data$std_price)
+names(data)[8] <- "log_price"
+hist(data$log_price)
+
+library(ggplot2)
+ggplot(data[which(data$cab_type == "Lyft"),], aes(x = distance, y = price, color = Cab_Name, size = surge_multiplier)) + geom_point()
+ggplot(data, aes(x = distance, y = std_price, color = Cab_Name)) + geom_smooth() + geom_vline(xintercept = 4)
+
+ggplot(data, aes(x = distance, y = price, color = Cab_Name, linetype = cab_type)) + geom_smooth(method = "lm")
+```
+
+
+# Base model
+
+```{r}
+base_mod <- lm(log_price ~ Cab_Name*cab_type + distance, data)
+summary(base_mod)   #0.7973
+
+base_mod1 <- lm(log_price ~ Cab_Name*cab_type + cab_type + cab_type:distance + log(distance), data)
+summary(base_mod1)   # 0.7991
+plot(base_mod1, which = 2)
+```
+
+# WLS based on distance
+
+```{r}
+long_dist <- data[which(data$distance >= 4),]
+short_dist <- data[which(data$distance < 4),]
+long_mod <- lm(log_price ~ Cab_Name*cab_type + cab_type*distance, long_dist)
+short_mod <- lm(log_price ~ Cab_Name*cab_type + cab_type*distance, short_dist)
+
+cbind("Long" = var(long_mod$residuals), "Short" = var(short_mod$residuals))
+var.test(long_mod$residuals, short_mod$residuals)   # different variance
+```
+
+```{r}
+# short distance being the base level
+a <- sqrt(var(short_mod$residuals) / var(long_mod$residuals))
+# standardize everything by a
+data[which(data$distance < 4),c(1,2)] <- data[which(data$distance < 4),c(1,2)] / a
+# re-standardize by surge_multiplier
+data$std_price <- data$price / data$surge_multiplier
+data$log_price <- log(data$std_price)
+```
+
+```{r}
+wls_mod <- lm(log_price ~ Cab_Name*cab_type + cab_type*distance, data)
+summary(wls_mod)   # 80.03%
+plot(wls_mod, which = 1)
+plot(wls_mod, which = 2)
+```
+
+
+# Identifying influential points
+
+```{r}
+cooksd <- cooks.distance(base_mod1)
+threshold <- 4 / nrow(data)
+influential <- which(cooksd > threshold)
+influential <- unique(influential)
+
+inf_data <- data[influential, ]
+summary(inf_data)
+ggplot(inf_data, aes(x = distance, y = log_price, color = Cab_Name, size = surge_multiplier)) + geom_point()
+```
+
+If remove all influential points and refit the model
+
+```{r}
+data2 <- data[-influential,]
+base_mod_refit <- lm(log_price ~ Cab_Name*cab_type + cab_type*distance, data2)
+summary(base_mod_refit)   #0.8155 -- 80.63% with log(distance)
+plot(base_mod_refit, which = 1)
+plot(base_mod_refit, which = 2)
+```
+
+```{r}
+stefany <- lm(price ~ Cab_Name + cab_type + distance*surge_multiplier, data)
+summary(stefany)
+```
+
+
+# Removing shared rides
+
+```{r}
+no_shared <- data[-which(data$Cab_Name == "Shared"),]
+no_shared_mod <- lm(log_price ~ Cab_Name*cab_type + cab_type*distance, no_shared)
+summary(no_shared_mod)
+```
+

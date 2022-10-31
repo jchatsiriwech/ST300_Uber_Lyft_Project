@@ -1,0 +1,158 @@
+---
+title: "Model Fitting Part 3"
+author: "Jakraya (Park) Chatsiriwech - Group 4"
+date: "2022-10-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read data into R
+
+```{r}
+data <- read.csv(file = "uber_lyft_cleaned_vF.csv", header = TRUE, stringsAsFactors = TRUE)
+
+# Transform into log price
+data[,7] <- log(data$price)
+names(data)[7] <- "log_price"
+
+library(ggplot2)
+ggplot(data[which(data$cab_type == "Lyft"),], aes(x = distance, y = price, color = Cab_Name, size = surge_multiplier)) + geom_point()
+
+ggplot(data[which(data$cab_type == "Lyft"),], aes(x = distance, y = std_price, color = Cab_Name)) + geom_smooth() + geom_vline(xintercept = 4)
+```
+
+
+# Fitting a model
+## Fitting a log transform model
+
+```{r}
+base_mod <- lm(log_price ~ Cab_Name + distance + surge_multiplier + cab_type, data)
+summary(base_mod)   # adjusted R^2 = 0.7862
+```
+
+## Add the interaction term
+1) Cab_Name and cab_type
+
+```{r}
+cab_mod <- lm(log_price ~ Cab_Name*cab_type + distance + surge_multiplier, data)
+summary(cab_mod)   # all coefs are significant, adj R^2 to 0.8034
+```
+
+2) cab_type/Cab_Name and distance
+
+```{r}
+library(ggplot2)
+ggplot(data, aes(x = distance, y = price, color = cab_type)) + 
+  geom_smooth(method = "lm")   # different slopes for each cab_type
+
+type_dist_mod <- lm(log_price ~ Cab_Name + distance*cab_type + surge_multiplier, data)
+summary(type_dist_mod)   # all coefs are significant, adj R^2 to 0.7879 
+plot(type_dist_mod, which = 1)
+
+ggplot(data, aes(x = distance, y = price, color = Cab_Name)) + 
+  geom_smooth(method = "lm")  # different slopes for each Cab_Name
+name_dist_mod <- lm(log_price ~ Cab_Name*distance + cab_type + surge_multiplier, data)
+summary(name_dist_mod)   # shared:distance almost 5%sig, 78.63% R^2
+```
+
+3) Combo of 1) and 2)
+
+```{r}
+ggplot(data, aes(x = distance, y = price, color = Cab_Name, linetype = cab_type)) +
+  geom_smooth(method = "lm")   # Uber in general has lower slope
+
+cab_dist_mod <- lm(log_price ~ Cab_Name*cab_type + cab_type*distance + surge_multiplier, data)
+summary(cab_dist_mod)   # all coefs are significant, adj R^2 to 0.8051
+plot(cab_dist_mod, which = 1)
+
+cab_dist_mod2 <- lm(log_price ~ Cab_Name*cab_type + Cab_Name*distance + surge_multiplier, data)
+summary(cab_dist_mod2)   # shared:distance is not significant
+rm(cab_dist_mod2)
+```
+
+4) distance and surge_multiplier
+
+```{r}
+dist_surge_mod <- lm(log_price ~ Cab_Name + distance*surge_multiplier + cab_type, data)
+summary(dist_surge_mod)   # all coefs are significant but same adjusted R^2 = 0.7862
+rm(dist_surge_mod)
+```
+
+5) Combo of 1) and 4)
+
+```{r}
+cab_dist_surge_mod <- lm(log_price ~ Cab_Name*cab_type + distance*surge_multiplier, data)
+summary(cab_dist_surge_mod)   # all coefs are significant but same adjusted R^2 = 0.8035
+rm(cab_dist_surge_mod)
+```
+
+## Transform surge_multiplier into a factor
+
+```{r}
+data[,8] <- as.factor(data$surge_multiplier)
+names(data)[8] <- "surge"
+summary(data$surge)
+levels(data$surge_multiplier[which(data$surge_multiplier >= 2)])
+```
+
+## Normalise the price by surge_multiplier then take the log
+
+```{r}
+data[,8] <- data$price / data$surge_multiplier
+names(data)[8] <- "std_price"
+data[,9] <- log(data$std_price)
+names(data)[9] <- "log_std_price"
+ggplot(data, aes(distance, std_price)) + geom_point()
+
+# Refit the model
+std_price_mod <- lm(std_price ~ Cab_Name + distance + cab_type, data)
+summary(std_price_mod)   # 0.733
+plot(std_price_mod, which = 1)
+
+log_std_price_mod <- lm(log_std_price ~ Cab_Name + distance + cab_type, data)
+summary(log_std_price_mod)   # adjusted R^2 = 0.7797
+plot(log_std_price_mod, which = 1)
+
+std_price_cab_mod <- lm(log_std_price ~ Cab_Name*cab_type + distance, data)
+summary(std_price_cab_mod)   # adjusted R^2 = 0.7973
+plot(std_price_cab_mod, which = 1)
+
+std_price_cab_mod2 <- lm(log_std_price ~ Cab_Name*cab_type + log(distance), data)
+summary(std_price_cab_mod2)   # adjusted R^2 = 0.7895 -- worse
+
+std_price_cab_mod3 <- lm(log_std_price ~ Cab_Name*cab_type + cab_type*distance, data)
+summary(std_price_cab_mod3)  # adjusted R^2 = 0.7991
+plot(std_price_cab_mod3, which = 1)
+
+gggplot()
+```
+
+## Adding Weather to the cab_mod
+
+```{r}
+ggplot(data, aes(surge_multiplier, price, color = Weather)) + geom_smooth(method = "lm")   # almost the same -- so insignificance isn't surprising
+
+wea_cab_mod <- lm(log_price ~ Cab_Name*cab_type + distance + surge_multiplier*Weather, data)
+summary(wea_cab_mod)
+rm(wea_cab_mod)
+```
+
+
+# Checking diagnostics plot
+
+```{r}
+plot(cab_mod, which = 1)
+# residual plots by cab_type
+uber_resid <- cab_mod$residuals[which(data$cab_type == "Uber")]
+lyft_resid <- cab_mod$residuals[which(data$cab_type != "Uber")]
+uber_fit <- cab_mod$fitted.values[which(data$cab_type == "Uber")]
+lyft_fit <- cab_mod$fitted.values[which(data$cab_type != "Uber")]
+
+par(mfrow = c(2,1))
+plot(uber_fit, uber_resid)
+plot(lyft_fit, lyft_resid)
+```
+

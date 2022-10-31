@@ -1,0 +1,114 @@
+---
+title: "Model Fitting Part 2"
+author: "Jakraya (Park) Chatsiriwech - Group 4"
+date: "2022-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read data into R
+
+```{r}
+data <- read.csv(file = "uber_lyft_cleaned_vF.csv", header = TRUE, stringsAsFactors = TRUE)
+
+ggplot(data, aes(x = price, fill = Cab_Name, color = cab_type)) + geom_boxplot()
+```
+
+
+# Fitting the base model -- Adding the Weather data
+
+```{r}
+base_mod <- lm(price ~ Cab_Name + distance + surge_multiplier + cab_type + Weather, data)
+summary(base_mod)  # none of the Weather coefs are significant -- 73.8% R^2
+
+par(mfrow = c(1,3))
+plot(base_mod, which = c(1,2,4))
+```
+**Comment:** From the diagnostics plots, there is a clear quadratic trend in the residuals, especially towards higher values of fitted values. With higher fitted values, we also see higher variance, implying the presence of heteroscedasticity, The normal QQ plot suggests fatter right tail, together with a few influential points, based on Cook's distance.
+
+So, try the log transform of price
+
+```{r}
+log_level_mod <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type + Weather, data)
+summary(log_level_mod)   # 79% R^2
+ 
+par(mfrow = c(1,3))
+plot(log_level_mod, which = c(1,2,4))
+```
+
+
+# Fitting the base model -- Adding the interaction term
+
+1) Interaction term between Weather and surge_multiplier
+```{r}
+interaction_mod1 <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type + Weather*surge_multiplier, data)
+summary(interaction_mod1)  # all are significant -- same 79% R^2
+
+par(mfrow = c(1,3))
+plot(interaction_mod1, which = c(1,2,4))
+```
+
+2) Interaction term between Weather and distance
+```{r}
+interaction_mod2 <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type + Weather*distance, data)
+summary(interaction_mod2)  # none of Weather coefs are significant -- same 79% R^2
+
+par(mfrow = c(1,3))
+plot(interaction_mod2, which = c(1,2,4))
+```
+
+3) Interaction term between surge_multiplier and distance
+```{r}
+interaction_mod3 <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type + distance*surge_multiplier, data)
+summary(interaction_mod3)  # all coefs are significant -- same 79% R^2
+
+par(mfrow = c(1,3))
+plot(interaction_mod3, which = c(1,2,4))
+```
+
+4) Interaction term between Cab_Name and Cab_Name
+```{r}
+interaction_mod4 <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type + Cab_Name*surge_multiplier, data)
+summary(interaction_mod4)  # no surge_multiplier applied for Shared rides
+
+par(mfrow = c(1,3))
+plot(interaction_mod3, which = c(1,2,4))
+```
+
+
+# Removing points that are outside the main clusters in the residuals plot
+
+```{r}
+rm_index <- intersect(which(log_level_mod$fitted.values <= 2.5), which(log_level_mod$residuals <= -0.4))
+
+rm_data <- data[rm_index, ]   # mostly shared ride for Lyft -- in which prices are extremely low
+summary(rm_data)
+
+library(ggplot2)
+ggplot(data[which(data$Cab_Name == "Shared"),], aes(x = distance, y = price, color = cab_type)) + geom_point()
+cheap_shared <- intersect(which(data$Cab_Name == "Shared"), which(data$price <= 5))
+
+
+data1 <- data[-rm_index,]
+
+# refit the log-level model
+log_level_1 <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type, data1)
+summary(log_level_1)   # R^2 improved from 0.7862 to 0.7881
+
+par(mfrow = c(1,3))
+plot(log_level_1, which = c(1,2,4))
+```
+
+# Transform the distance predictor
+``` {r}
+# refit the log-level model
+log_level_2 <- lm(log(price) ~ Cab_Name + distance*surge_multiplier + cab_type, data1)
+summary(log_level_2)   # R^2 rose from 0.7862 to 0.7873
+
+par(mfrow = c(1,3))
+plot(log_level_2, which = c(1,2,4))
+```
+

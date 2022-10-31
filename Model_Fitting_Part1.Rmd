@@ -1,0 +1,438 @@
+---
+title: "Model Fitting Part 1"
+author: "Jakraya (Park) Chatsiriwech - Group 4"
+date: "2022-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read data into R
+
+```{r}
+data <- read.csv(file = "uber_lyft_cleaned_vF.csv", header = TRUE, stringsAsFactors = TRUE)
+```
+
+
+# Data visualisation
+
+```{r}
+library(ggplot2)
+ggplot(data, aes(x = price, fill = Cab_Name, color = cab_type)) + geom_histogram()
+ggplot(data, aes(x = distance, fill = Weather)) + geom_histogram()
+ggplot(data, aes(x = surge_multiplier, fill = Cab_Name, color = Weather)) + geom_histogram()  # we know that only Lyft apply surge_multiplier
+
+library(PerformanceAnalytics)
+skewness(data$price)   # highly positively skewed
+skewness(data$distance)
+skewness(data$surge_multiplier)   # super positively skewed
+
+attach(data)
+table(surge_multiplier, Cab_Name, cab_type)
+data[,7] <- as.factor(surge_multiplier)
+names(data)[7] <- "surge_fac"
+summary(data$surge_fac)
+```
+
+
+# Fitting the base model
+
+```{r}
+base_mod <- lm(price ~ Cab_Name + distance + surge_multiplier + cab_type, data)
+summary(base_mod)  # all coef are significant -- 74% adjusted R^2
+anova(base_mod)
+
+par(mfrow = c(1,3))
+plot(base_mod, which = c(1,2,4))
+```
+
+**Comment:** From the diagnostics plots, there is a clear quadratic trend in the residuals, especially towards higher values of fitted values. With higher fitted values, we also see higher variance, implying the presence of heteroscedasticity, The normal QQ plot suggests fatter right tail, together with a few influential points, based on Cook's distance.
+
+
+# Transformation of Variables
+Since both non-normality and unequal variance are problems, we will transform the response variable `price` first. We apply the log transform since we observe price is positively skewed
+
+```{r}
+log_lin_mod <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type, data)
+summary(log_lin_mod)   # Adjusted R^2 rose to 79%
+
+par(mfrow = c(1,3))
+plot(log_lin_mod, which = c(1,2,4))
+
+mean(log_lin_mod$residuals)   # approximately 0
+```
+**Comment:** The residuals now centered around 0, but heteroscedasticity is still observed, but now in reversed order. The normal QQ-plot is more closely align with the theoretical straight line, but it wiggles around it. There are still a number of high influential points.
+
+Based on the visualisation, we see that `surge_multiplier` is heavily positively skewed. So, we will perform a log transformation on this below.
+
+```{r}
+log_surge_mod <- lm(log(price) ~ Cab_Name + distance + log(surge_multiplier + 1)+ cab_type, data)
+summary(log_surge_mod)   # negligible improvement in R^2
+```
+
+Try log of distance too.
+
+```{r}
+log_dist_mod <- lm(log(price) ~ Cab_Name + log(distance) + surge_multiplier + cab_type, data)
+summary(log_dist_mod)   # worse than log-lin model
+```
+
+Try square transformation on `distance`.
+
+```{r}
+squared_dist_mod <- lm(log(price) ~ Cab_Name + I(distance^2) + surge_multiplier + cab_type, data)
+summary(squared_dist_mod)   # a little worse than log-lin model
+plot(squared_dist_mod, which = c(1,2,4))
+```
+
+Try square transformation on surge_multiplier
+
+```{r}
+squared_surge_mod <- lm(log(price) ~ Cab_Name + distance + I(surge_multiplier^2) + cab_type, data)
+summary(squared_surge_mod)   # comparable to log-lin model
+plot(squared_surge_mod, which = c(1,2,4))
+```
+
+**Conclusion:** It seems like the `log_lin_mod` gives the best result, yet being the simplest. However, not all assumptions are satisfied. So, we will explore each of the 6 assumptions in the following section.
+
+## A1: The model is linear -- partial residual plot
+
+```{r}
+library(car)
+# crPlots(log_lin_mod)
+```
+
+## A2: The design matrix is a constant with full column rank -- multicollinearity
+We see all predictors are being significant, signalling a good sign. Standard errors of each coefficients, relative to the coefficient estimates, are also small.
+
+```{r}
+summary(log_lin_mod)
+
+# VIF
+round(vif(log_lin_mod), 4)   # all are around 1 < 4 -- so all good
+
+# Check correlation
+cor(data[, c(1,2,5)])  # low correlation since we have removed all columns with high correlation during the cleaning stage
+library(corrplot)
+corrplot(cor(data[, c(1,2,5)]))
+```
+
+
+## A3: Residuals has zero mean
+This is satisfied.
+
+```{r}
+mean(log_lin_mod$residuals)   # super close to 0
+```
+
+## A4: Homoscedasticity -- constant variance
+
+```{r}
+plot(log_lin_mod, which = 1)   # fix this
+
+# Cab_Name
+shared_resid <- log_lin_mod$residuals[which(data$Cab_Name == "Shared")]
+reg_resid <- log_lin_mod$residuals[which(data$Cab_Name == "Regular")]
+lux_resid <- log_lin_mod$residuals[which(data$Cab_Name == "Luxury")]
+cbind("Shared" = var(shared_resid), "Regular" = var(reg_resid), "Luxury" = var(lux_resid))
+
+var.test(shared_resid, reg_resid)
+var.test(shared_resid, lux_resid)
+var.test(reg_resid, lux_resid)
+
+levels(data$Cab_Name)
+# luxury as the base class
+a_shared <- sqrt(var(shared_resid)/var(lux_resid))
+a_reg <- sqrt(var(reg_resid)/var(lux_resid))
+
+data[,7] <- log(data$price)
+names(data)[7] <- "log_price"
+
+wls_data <- data
+wls_data[which(wls_data$Cab_Name == "Shared"), c(7,2,5)] <-
+  wls_data[which(wls_data$Cab_Name == "Shared"), c(7,2,5)]/a_shared
+wls_data[which(wls_data$Cab_Name == "Regular"), c(7,2,5)] <-
+  wls_data[which(wls_data$Cab_Name == "Regular"), c(7,2,5)]/a_reg
+
+wls_mod <- lm(log_price ~ Cab_Name + distance + surge_multiplier + cab_type, wls_data)
+summary(wls_mod)   # adjusted R^2 improved to 0.8396
+
+plot(wls_mod, which = 1)
+library(lmtest)
+bptest(wls_mod)
+
+# cab_type
+uber_resid <- wls_mod$residuals[which(wls_data$cab_type == "Uber")]
+lyft_resid <- wls_mod$residuals[which(wls_data$cab_type == "Lyft")]
+cbind("Uber" = var(uber_resid), "Lyft" = var(lyft_resid))
+var.test(uber_resid, lyft_resid)   # highly significant
+
+levels(wls_data$cab_type)   # lyft is the base level
+a_uber <- sqrt(var(uber_resid)/var(lyft_resid))
+
+wls2_data <- wls_data
+wls2_data[which(wls2_data$cab_type == "Uber"), c(7,2,5)] <-
+  wls2_data[which(wls2_data$cab_type == "Uber"), c(7,2,5)]/a_uber
+
+ggplot(wls2_data, aes(x = distance, y = price, color = Cab_Name)) +
+  geom_smooth() +
+  geom_vline(xintercept = 4.25)
+ggplot(wls2_data, aes(x = distance, y = price, color = cab_type)) +
+  geom_smooth(method = "lm") +
+  geom_vline(xintercept = 4.25)
+
+# slope is different among Cab_Name -- need the interaction term
+wls2_mod <- lm(log_price ~ Cab_Name + distance*cab_type + I(distance^2) + surge_multiplier, wls2_data)
+summary(wls2_mod)   # adjusted R^2 improved to 0.8449 -- 0.8461 with cab_type
+plot(wls2_mod, which = 1)
+
+# Weather
+clear_resid <- wls2_mod$residuals[which(wls2_data$Weather == "Clear")]
+cloudy_resid <- wls2_mod$residuals[which(wls2_data$Weather == "Cloudy")]
+rainy_resid <- wls2_mod$residuals[which(wls2_data$Weather == "Rainy")]
+cbind("Clear" = var(clear_resid), "Cloudy" = var(cloudy_resid), "Rainy" = var(rainy_resid))
+var.test(clear_resid, cloudy_resid)   # none is significant
+var.test(clear_resid, rainy_resid) 
+var.test(rainy_resid, cloudy_resid) 
+
+
+# distance -- cut-off point is 4.25
+short_resid <- wls2_mod$residuals[which(wls2_data$distance <= 4.25)]
+long_resid <- wls2_mod$residuals[-which(wls2_data$distance <= 4.25)]
+cbind("Short" = var(short_resid), "Long" = var(long_resid))
+var.test(short_resid, long_resid)   # highly significant
+
+a_long <- sqrt(var(long_resid)/var(short_resid))
+wls3_data <- wls2_data
+wls3_data[which(wls3_data$distance > 4.25), c(7,2,5)] <-
+  wls3_data[which(wls3_data$distance > 4.25), c(7,2,5)]/a_long
+
+wls3_mod <- lm(log_price ~ Cab_Name + distance + cab_type + surge_multiplier, wls3_data)
+summary(wls3_mod)   # adjusted R^2 improved to 0.8495 with normal
+plot(wls3_mod, which = 1)
+```
+
+## A5: Error terms are pairwise uncorrelated
+We don't usually worry about residuals being independent or not. So skip this.
+
+## A6: Error terms are multivariate normal -- QQ plot
+
+```{r}
+qqnorm(log_lin_mod$residuals)
+qqline(log_lin_mod$residuals)
+
+# Test for normality
+library(tseries)
+jarque.bera.test(log_lin_mod$residuals)  # highly significant
+
+library(PerformanceAnalytics)
+skewness(log_lin_mod$residuals)
+kurtosis(log_lin_mod$residuals)
+```
+
+
+# Diagnostic plots for wls2_mod
+```{r}
+## A1
+plot(wls2_mod, which = 1) # still a chunk of low fitted values that are not random
+# wider band at the middle -- very narrow towards the right
+
+## A2  -- checked
+summary(wls2_mod)
+# VIF
+round(vif(wls2_mod), 4)   # all are around 1 < 4 -- so all good
+# Check correlation
+cor(wls2_data[, c(7,2,5)])  # low correlation since we have removed all columns with high correlation during the cleaning stage
+library(corrplot)
+corrplot(cor(wls2_data[, c(7,2,5)]))
+
+## A3  -- checked
+mean(wls2_mod$residuals)   # checked
+
+## A4
+plot(wls2_mod, which = 1)
+
+## A5 -- don't really care
+
+## A6
+qqnorm(wls2_mod$residuals)
+qqline(wls2_mod$residuals)
+
+## Influential points
+plot(wls2_mod, which = 4)
+sum(cooks.distance(wls2_mod) >= 4/nrow(wls2_data))   # 20k influential points
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+=============================================================================
+
+## Influential points
+
+```{r}
+plot(log_lin_mod, which = 4)
+
+# Extract the Cook's distance
+cooksd <- cooks.distance(log_lin_mod)
+threshold <- 4/nrow(data)
+influential <- which(cooksd > threshold)
+influential <- unique(influential)
+
+influ_data <- data[influential, ]
+ggplot(influ_data, aes(x = distance, y = price, color = Cab_Name)) + geom_point()
+ggplot(influ_data, aes(x = distance,  y = price, color = surge_multiplier)) + geom_point()
+ggplot(influ_data, aes(x = price,  fill = Cab_Name)) + geom_boxplot()
+ggplot(data, aes(x = price, fill = Cab_Name)) + geom_boxplot()
+
+shared_influ_data <- influ_data[which(influ_data$Cab_Name == "Shared"), ]
+nrow(data[which(data$Cab_Name == "Shared"), ])
+ggplot(shared_influ_data, aes(x = distance, y = price, color = cab_type)) + geom_point()
+
+# price below 3
+below3 <- influ_data[which(influ_data$price <= 3), ]
+summary(below3)
+summary(data$price)
+
+# outlier shared cars
+q1 <- quantile(shared_influ_data$price)[2]
+q3 <- quantile(shared_influ_data$price)[4]
+iqr <- q3-q1
+out_shared_threshold <- q3 + iqr
+out_shared <- shared_influ_data[which(shared_influ_data$price >= out_shared_threshold),]
+```
+
+
+## Removing outliers in the shared car
+
+```{r}
+shared_out_index <- intersect(which(data$Cab_Name == "Shared"), which(data$price >= out_shared_threshold))
+shared_out_index <- intersect(shared_out_index, influential)
+no_shared_out_data <- data[-shared_out_index, ]
+
+no_shared_out_mod <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type, no_shared_out_data)
+summary(no_shared_out_mod)   # adjusted R^2 improved to above 79%
+
+plot(no_shared_out_mod, which = 4)
+
+# Extract cook's distance
+cooksd1 <- cooks.distance(no_shared_out_mod)
+influential1 <- which(cooksd1 > threshold)
+influential1 <- unique(influential1)
+influ_data1 <- data[influential1, ]
+
+ggplot(influ_data1, aes(x = price,  fill = Cab_Name)) + geom_boxplot()
+ggplot(data, aes(x = price, fill = Cab_Name)) + geom_boxplot()
+
+lux_influ_data <- influ_data1[which(influ_data1$Cab_Name == "Luxury"), ]
+ggplot(lux_influ_data, aes(x = distance, y = price, color = surge_multiplier)) + geom_point()
+
+# outlier luxury cars
+q1_lux <- quantile(lux_influ_data$price)[2]
+q3_lux <- quantile(lux_influ_data$price)[4]
+iqr_lux <- q3_lux - q1_lux
+out_lux_threshold <- q3_lux + iqr_lux
+out_lux <- lux_influ_data[which(lux_influ_data$price >= out_lux_threshold),]
+```
+
+
+## Removing outliers in the luxury car
+
+```{r}
+lux_out_index <- intersect(which(data$Cab_Name == "Luxury"), which(data$price >= out_lux_threshold))
+lux_out_index <- intersect(lux_out_index, influential1)
+no_lux_out_data <- no_shared_out_data[-lux_out_index, ]
+
+no_lux_out_mod <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type, no_lux_out_data)
+summary(no_lux_out_mod)   # little improvement in adjusted R^2
+
+plot(no_lux_out_mod, which = 4)
+
+# Extract cook's distance
+cooksd2 <- cooks.distance(no_lux_out_mod)
+influential2 <- which(cooksd2 > threshold)
+influential2 <- unique(influential2)
+influ_data2 <- data[influential2, ]
+
+ggplot(influ_data2, aes(x = price,  fill = Cab_Name)) + geom_boxplot()
+ggplot(data, aes(x = price, fill = Cab_Name)) + geom_boxplot()
+
+reg_influ_data <- influ_data2[which(influ_data2$Cab_Name == "Regular"), ]
+ggplot(reg_influ_data, aes(x = distance, y = price, color = surge_multiplier)) + geom_point()
+
+# outlier regular cars
+q1_reg <- quantile(reg_influ_data$price)[2]
+q3_reg <- quantile(reg_influ_data$price)[4]
+iqr_reg <- q3_reg - q1_reg
+out_reg_threshold <- q3_reg + iqr_reg
+out_reg <- reg_influ_data[which(reg_influ_data$price >= out_reg_threshold),]
+```
+
+
+## Removing outliers in the regular car
+
+```{r}
+reg_out_index <- intersect(which(data$Cab_Name == "Regular"), which(data$price >= out_reg_threshold))
+reg_out_index <- intersect(reg_out_index, influential2)
+no_reg_out_data <- no_lux_out_data[-reg_out_index, ]
+
+no_reg_out_mod <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type, no_reg_out_data)
+summary(no_reg_out_mod)   # little more improvement in adjusted R^2
+
+plot(no_reg_out_mod, which = 4)
+
+# Extract cook's distance
+cooksd3 <- cooks.distance(no_reg_out_mod)
+influential3 <- which(cooksd3 > threshold)
+influential3 <- unique(influential3)
+influ_data3 <- data[influential3, ]
+
+ggplot(influ_data3, aes(x = price,  fill = Cab_Name)) + geom_boxplot()
+ggplot(influ_data3, aes(x = distance, y = price, color = Cab_Name)) + geom_point()
+
+above_50 <- influ_data3[which(influ_data3$price >= 50), ]
+summary(above_50)
+nrow(data[which(data$price >= 50),])
+```
+
+## Removing outliers with price above 50
+
+```{r}
+above50_index <- intersect(which(data$price >= 50), influential3)
+no_above_50_out_data <- no_reg_out_data[-above50_index, ]
+sum(no_above_50_out_data$price >= 50)
+
+no_above50_out_mod <- lm(log(price) ~ Cab_Name + distance + surge_multiplier + cab_type, no_above_50_out_data)
+summary(no_above50_out_mod)   # no improvement in adjusted R^2
+
+plot(no_reg_out_mod, which = 4)
+
+# Extract cook's distance
+cooksd4 <- cooks.distance(no_above50_out_mod)
+influential4 <- which(cooksd4 > threshold)
+influential4 <- unique(influential4)
+influ_data4 <- data[influential4, ]
+
+ggplot(influ_data4, aes(x = price,  fill = Cab_Name)) + geom_boxplot()
+ggplot(influ_data4, aes(x = distance, y = price, color = Cab_Name)) + geom_point()
+```
+
+
+## Revisit the dianostics plot
+
+```{r}
+plot(no_above50_out_mod, which = 1)
+```
+
