@@ -1,0 +1,143 @@
+---
+title: "Variable Selection (Spare)"
+author: "Jakraya (Park) Chatsiriwech - Group 4"
+date: "2022-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# library(usethis)
+# usethis::edit_r_environ()
+```
+
+# Read the raw data into R
+
+```{r}
+raw_data <- read.csv(file = "rideshare_kaggle.csv", header = TRUE, stringsAsFactors = TRUE)
+raw_data <- raw_data[!is.na(raw_data$price), ]
+weather_data <- raw_data[, c(13:15, 18:19, 22:36, 38:57)]  # first 18 columns already in the data_vF
+
+rm(raw_data)
+
+cor_matrix <- cor(weather_data)
+# cor_matrix[which(cor_matrix >= 0.9)]
+library(corrplot)
+corrplot(cor_matrix, type = "lower", tl.cex = 0.5) 
+
+library(dplyr)
+weather_data <- subset(weather_data, select = -c(windGustTime, temperatureHighTime, temperatureLowTime, apparentTemperatureHighTime, apparentTemperatureLowTime, sunsetTime, sunriseTime, moonPhase, uvIndexTime, temperatureMinTime, temperatureMaxTime, apparentTemperatureMinTime, apparentTemperatureMaxTime))
+
+cor_matrix <- cor(weather_data)
+corrplot(cor_matrix, type = "lower", tl.cex = 0.5) 
+
+weather_data <- subset(weather_data, select = -c(visibility.1, temperatureMax, temperatureMin, apparentTemperatureMin, apparentTemperatureMax))
+
+cor_matrix <- cor(weather_data)
+corrplot(cor_matrix, type = "lower", tl.cex = 0.5) 
+
+weather_data <- subset(weather_data, select = -c(apparentTemperature, apparentTemperatureHigh, apparentTemperatureLow, dewPoint))
+
+cor_matrix <- cor(weather_data)
+corrplot(cor_matrix, type = "lower", tl.cex = 0.5) 
+```
+
+# Forward selection
+
+```{r}
+library(leaps)
+fwd_selection <- regsubsets(price ~ ., weather_data, method = "forward", nvmax = 10)
+fwd_summary <- summary(fwd_selection)
+
+fwd_summary$which
+
+# Plot RSS, adjusted R^2, BIC
+max_adjr2 <- which.max(fwd_summary$adjr2)
+min_bic <- which.min(fwd_summary$bic)
+
+par(mfrow = c(3,1))
+plot(fwd_summary$rss, type = "l", xlab = "Number of Variables", ylab = "RSS")
+plot(fwd_summary$adjr2, type = "l", xlab = "Number of Variables", ylab = "Adjusted R^2")
+points(max_adjr2, fwd_summary$adjr2[max_adjr2], col = "red", pch = 20, cex = 2)
+plot(fwd_summary$bic, type = "l", xlab = "Number of Variables", ylab = "BIC")
+points(min_bic, fwd_summary$bic[min_bic], col = "red", pch = 20, cex = 2)
+
+# Plot of variables selected
+plot(fwd_selection, scale = "adjr2")   # distance, surge_multiplier, cloudCover
+plot(fwd_selection, scale = "bic")  # distance, surge_multiplier
+plot(fwd_selection, scale = "Cp") # distance, surge_multiplier, cloudCover
+
+# The chosen model
+coef(fwd_selection, 3)  # based on adjusted R^2 and Cp
+coef(fwd_selection, 2)  # based on bic
+```
+
+# Perform backward selection algorithm
+
+```{r}
+bwd_selection <- regsubsets(price ~ ., weather_data, method = "backward", nvmax = 10)
+bwd_summary <- summary(bwd_selection)
+bwd_summary$which
+
+# Plot RSS, adjusted R^2, BIC
+max_adjr2 <- which.max(bwd_summary$adjr2)
+min_bic <- which.min(bwd_summary$bic)
+
+par(mfrow = c(3,1))
+plot(bwd_summary$rss, type = "l", xlab = "Number of Variables", ylab = "RSS")
+plot(bwd_summary$adjr2, type = "l", xlab = "Number of Variables", ylab = "Adjusted R^2")
+points(max_adjr2, bwd_summary$adjr2[max_adjr2], col = "red", pch = 20, cex = 2)
+plot(bwd_summary$bic, type = "l", xlab = "Number of Variables", ylab = "BIC")
+points(min_bic, bwd_summary$bic[min_bic], col = "red", pch = 20, cex = 2)
+
+# Plot of variables selected
+plot(bwd_selection, scale = "adjr2")   # distance, surge_multiplier, windSpeed, windGust, temperatureHigh, cloudCover
+plot(bwd_selection, scale = "bic")  # distance, surge_multiplier
+plot(bwd_selection, scale = "Cp") # distance, surge_multiplier, cloudCover
+
+# The chosen model
+coef(bwd_selection, 6)  # based on adjusted R^2
+coef(bwd_selection, 2)  # based on bic
+coef(bwd_selection, 3)  # based on Cp
+```
+
+# Perform stepwise selection algorithm using AIC
+
+```{r}
+null_mod <- lm(price ~ 1, data = weather_data)
+full_mod <- lm(price ~ ., data = weather_data)
+
+# Forward selection
+fwd_step_selection <- step(object = null_mod, 
+                           scope = list(lower = null_mod, upper = full_mod),
+                           direction = "forward", trace = 0)
+summary(fwd_step_selection)  # distance, surge_multiplier, cloudCover (insignificant)
+# plot(fwd_step_selection)
+
+# Backward selection
+bwd_step_selection <- step(object = full_mod, 
+                           scope = list(lower = null_mod, upper = full_mod),
+                           direction = "backward")
+summary(bwd_step_selection)  # distance, surge_multiplier, windSpeed, windGust, cloudCover
+
+# Both direction
+both_step_selection <- step(object = null_mod, 
+                           scope = list(lower = null_mod, upper = full_mod),
+                           direction = "both")
+summary(both_step_selection)  # distance, surge_multiplier, cloudCover
+```
+
+
+# Perform best subset selection
+Since the adjusted R^2 suggests the inclusion of `windGust` and `windSpeed`, we will test whether these are worth including in the model or not. We will also check on our intuition with `temperatureHigh` as well.
+
+```{r}
+best_mod <- regsubsets(price ~ distance + surge_multiplier + windSpeed + windGust + cloudCover + temperatureHigh, data = weather_data)
+
+par(mfrow = c(1,2))
+plot(best_mod, scale = "adjr2")   # include all
+plot(best_mod, scale = "bic")  # distance, surge_multiplier
+
+coef(best_mod, 6)
+coef(best_mod, 2)
+```

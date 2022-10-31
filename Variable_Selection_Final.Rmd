@@ -1,0 +1,214 @@
+---
+title: "Variable Seleection Final"
+author: "Jakraya (Park) Chatsiriwech - Group 4"
+date: "2022-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+From the conclusion in the variable selection stage, the important predictors of price are:
+1) Cab_Name
+2) distance
+3) surge_multiplier
+4) cab_type
+
+Although `Weather` by itself is not significant, including an interaction term with either surge_multiplier or distance makes it significant. Backward selection also suggests the inclusion of `windSpeed` but it is insignificant when fitted a model.
+
+From the full (spare) variable selection, a number of algorithm agrees that `cloudCover` gives useful information after fitting distance and surge_multiplier. So, we will also try to explore this further at this stage.
+
+
+# Read data into R
+
+```{r}
+data <- read.csv(file = "uber_lyft_cleaned_vF.csv", header = TRUE, stringsAsFactors = TRUE)
+
+raw_data <- read.csv(file = "rideshare_kaggle.csv", header = TRUE, stringsAsFactors = TRUE)
+raw_data <- raw_data[!is.na(raw_data$price), ]
+
+# Extract just the cloudCover column
+cloudcover <- raw_data$cloudCover
+rm(raw_data)   # Remove raw_data to save space
+
+# combine the cloud cover data with the dataframe
+data <- cbind(data, cloudcover)
+rm(cloudcover)
+
+# Check NAs
+# check for NAs in price
+for (i in 1:ncol(data)) {
+  if (sum(is.na(data[,i])) >= 1) {
+    print(paste(names(data)[i], "contains NAs", sep = " "))
+  } else {
+    print("all good")
+  }
+}
+```  
+
+
+# Rerun the variable selection algorithm using AIC
+
+```{r}
+null_mod <- lm(price ~ 1, data = data)
+full_mod <- lm(price ~ ., data = data)
+
+# Forward selection
+fwd_step_selection <- step(object = null_mod, 
+                           scope = list(lower = null_mod, upper = full_mod),
+                           direction = "forward")
+summary(fwd_step_selection)  # Cab_Name, distance, surge_multiplier, cab_type
+plot(fwd_step_selection)
+
+# Backward selection
+bwd_step_selection <- step(object = full_mod, 
+                           scope = list(lower = null_mod, upper = full_mod),
+                           direction = "backward")
+summary(bwd_step_selection)  # Cab_Name, distance, surge_multiplier, cab_type
+
+# Both direction
+both_step_selection <- step(object = null_mod, 
+                           scope = list(lower = null_mod, upper = full_mod),
+                           direction = "both")
+summary(both_step_selection)
+```
+
+# Rerun the forward selection algorithm with other error measures
+
+```{r}
+library(leaps)
+fwd_selection <- regsubsets(price ~ ., data, method = "forward", nvmax = 8)
+fwd_summary <- summary(fwd_selection)
+fwd_summary$which
+
+# Plot RSS, adjusted R^2, BIC
+max_adjr2 <- which.max(fwd_summary$adjr2)
+min_bic <- which.min(fwd_summary$bic)
+
+par(mfrow = c(3,1))
+plot(fwd_summary$rss, type = "l", xlab = "Number of Variables", ylab = "RSS")
+plot(fwd_summary$adjr2, type = "l", xlab = "Number of Variables", ylab = "Adjusted R^2")
+points(max_adjr2, fwd_summary$adjr2[max_adjr2], col = "red", pch = 20, cex = 2)
+plot(fwd_summary$bic, type = "l", xlab = "Number of Variables", ylab = "BIC")
+points(min_bic, fwd_summary$bic[min_bic], col = "red", pch = 20, cex = 2)
+
+# Plot of variables selected
+plot(fwd_selection, scale = "adjr2")   # distance, cab_type, Cab_Name, surge_multiplier, Weather (no Rainy), windSpeed
+plot(fwd_selection, scale = "bic")  # distance, cab_type, Cab_Name, surge_multiplier
+plot(fwd_selection, scale = "Cp") # distance, cab_type, Cab_Name, surge_multiplier
+
+# The chosen model
+coef(fwd_selection, 7)  # based on adjusted R^2
+coef(fwd_selection, 5)  # based on bic and Cp
+```
+
+# Rerun the backward selection algorithm with other error measures
+
+```{r}
+bwd_selection <- regsubsets(price ~ ., data, method = "backward", nvmax = 8)
+bwd_summary <- summary(bwd_selection)
+bwd_summary$which
+
+# Plot RSS, adjusted R^2, BIC
+max_adjr2 <- which.max(bwd_summary$adjr2)
+min_bic <- which.min(bwd_summary$bic)
+
+par(mfrow = c(3,1))
+plot(bwd_summary$rss, type = "l", xlab = "Number of Variables", ylab = "RSS")
+plot(bwd_summary$adjr2, type = "l", xlab = "Number of Variables", ylab = "Adjusted R^2")
+points(max_adjr2, bwd_summary$adjr2[max_adjr2], col = "red", pch = 20, cex = 2)
+plot(bwd_summary$bic, type = "l", xlab = "Number of Variables", ylab = "BIC")
+points(min_bic, bwd_summary$bic[min_bic], col = "red", pch = 20, cex = 2)
+
+# Plot of variables selected
+plot(bwd_selection, scale = "adjr2")   # distance, cab_type, Cab_Name, surge_multiplier, Weather (no Rainy), windSpeed
+plot(bwd_selection, scale = "bic")  # distance, cab_type, Cab_Name, surge_multiplier
+plot(bwd_selection, scale = "Cp") # distance, cab_type, Cab_Name, surge_multiplier
+
+# The chosen model
+coef(bwd_selection, 7)  # based on adjusted R^2  
+coef(bwd_selection, 5)  # based on bic and Cp
+```
+
+# Rerun best subset selection
+
+```{r}
+best_mod <- regsubsets(price ~ Cab_Name + distance + surge_multiplier + cab_type + + windSpeed + cloudcover + Weather, data = data)
+
+par(mfrow = c(1,2))
+plot(best_mod, scale = "adjr2")   # without Weather, all except cloudcover
+                                  # with Weather, same result but include Weather (cloudy)
+plot(best_mod, scale = "bic")  # without Weather, all except windSpeed and cloudcover -- same result with Weather (no Weather included)
+
+coef(best_mod, 7)
+coef(best_mod, 5)
+```
+
+
+# Explore the relationship between Weather, windSpeed and cloudcover
+
+```{r}
+library(ggplot2)
+ggplot(data, aes(x = windSpeed, fill = Weather)) + geom_histogram()
+ggplot(data, aes(x = windSpeed, fill = Weather)) + geom_boxplot()
+ggplot(data, aes(x = cloudcover, fill = Weather)) + geom_histogram()
+ggplot(data, aes(x = cloudcover, fill = Weather)) + geom_boxplot()
+
+ggplot(data, aes(x = windSpeed, y = price, color = Weather)) + 
+  geom_smooth(method = "lm")  # clear increasing trend for 'Clear' category
+ggplot(data, aes(x = distance, y = price, color = Weather)) + 
+  geom_smooth(method = "lm")
+ggplot(data, aes(x = surge_multiplier, y = price, color = Weather)) + 
+  geom_smooth(method = "lm")
+ggplot(data, aes(x = cloudcover, y = price, color = Weather)) + 
+  geom_smooth(method = "lm")  # not very helpful
+ggplot(data, aes(x = temperature, y = price, color = Weather)) + 
+  geom_smooth(method = "lm")
+ggplot(data, aes(x = precipIntensity, y = price, color = Weather)) + 
+  geom_smooth(method = "lm")
+ggplot(data, aes(x = visibility, y = price, color = Weather)) + 
+  geom_smooth(method = "lm")
+ggplot(data, aes(x = humidity, y = price, color = Weather)) + 
+  geom_smooth(method = "lm")
+
+library(corrplot)
+corrplot(cor(data[, c(1,2,5,7,8)]))
+```
+
+
+# Removing redundant variables
+Given all models find `Weekday`, `Peak`, `temperature`, `precipIntensity`, `humidity` and `visibility` insignificant, we will remove these from the data set.
+
+```{r}
+data <- subset(data, select = -c(Weekday, Peak, temperature, precipIntensity, humidity, visibility))
+```
+
+
+# Fit a model with cloudcover
+
+```{r}
+cloud_mod <- lm(price ~ Cab_Name + distance + surge_multiplier + cab_type + cloudcover, data)
+summary(cloud_mod)
+```
+
+# Relevel the Weather factor and refit a model
+
+```{r}
+levels(data$Weather)
+data$Weather <- relevel(data$Weather, "Cloudy")  # make Clear the base category, then Cloudy and Rainy
+data$Weather <- relevel(data$Weather, "Clear")
+
+mod <- lm(price ~ Cab_Name + distance + surge_multiplier + cab_type + windSpeed, data)
+summary(mod)
+```
+
+# Final conclusion
+`windSpeed` and `cloudcover` are also insignificant, so we will also remove them. 
+```{r}
+data <- subset(data, select = -c(cloudcover, windSpeed))
+
+write.csv(data, file = "uber_lyft_cleaned_vF.csv", row.names = FALSE, col.names = TRUE)
+```
+

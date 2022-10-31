@@ -1,0 +1,147 @@
+---
+title: "Variable Selection"
+author: "Jakraya (Park) Chatsiriwech - Group 4"
+date: "2022-10-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Objectives
+The aim of this part of the analysis is to run algorithms to select the important variables into the model and confirm our intuition regarding which variables should explain the price of the ride.
+
+Out intuitive model regress **price on distance, Peak, cab_type, Cab_Name, surge_multiplier and Weather**
+
+
+# Read data into R
+
+```{r}
+data <- read.csv(file = "uber_lyft_cleaned_vF.csv", header = TRUE, 
+                 stringsAsFactors = TRUE)
+```
+
+
+# Perform forward selection algorithm
+
+```{r}
+library(leaps)
+fwd_selection <- regsubsets(price ~ ., data, method = "forward", nvmax = 10)
+fwd_summary <- summary(fwd_selection)
+fwd_summary$which
+
+# Plot RSS, adjusted R^2, BIC
+max_adjr2 <- which.max(fwd_summary$adjr2)
+min_bic <- which.min(fwd_summary$bic)
+
+par(mfrow = c(3,1))
+plot(fwd_summary$rss, type = "l", xlab = "Number of Variables", ylab = "RSS")
+plot(fwd_summary$adjr2, type = "l", xlab = "Number of Variables", ylab = "Adjusted R^2")
+points(max_adjr2, fwd_summary$adjr2[max_adjr2], col = "red", pch = 20, cex = 2)
+plot(fwd_summary$bic, type = "l", xlab = "Number of Variables", ylab = "BIC")
+points(min_bic, fwd_summary$bic[min_bic], col = "red", pch = 20, cex = 2)
+
+# Plot of variables selected
+plot(fwd_selection, scale = "adjr2")   # distance, cab_type, Cab_Name, surge_multiplier, Weather (no Rainy), windSpeed
+plot(fwd_selection, scale = "bic")  # distance, cab_type, Cab_Name, surge_multiplier
+plot(fwd_selection, scale = "Cp") # distance, cab_type, Cab_Name, surge_multiplier
+
+# The chosen model
+coef(fwd_selection, 7)  # based on adjusted R^2
+coef(fwd_selection, 5)  # based on bic
+coef(fwd_selection, 4)  # based on Cp
+```
+
+# Perform backward selection algorithm
+
+```{r}
+bwd_selection <- regsubsets(price ~ ., data, method = "backward", nvmax = 10)
+bwd_summary <- summary(bwd_selection)
+bwd_summary$which
+
+# Plot RSS, adjusted R^2, BIC
+max_adjr2 <- which.max(bwd_summary$adjr2)
+min_bic <- which.min(bwd_summary$bic)
+
+par(mfrow = c(3,1))
+plot(bwd_summary$rss, type = "l", xlab = "Number of Variables", ylab = "RSS")
+plot(bwd_summary$adjr2, type = "l", xlab = "Number of Variables", ylab = "Adjusted R^2")
+points(max_adjr2, bwd_summary$adjr2[max_adjr2], col = "red", pch = 20, cex = 2)
+plot(bwd_summary$bic, type = "l", xlab = "Number of Variables", ylab = "BIC")
+points(min_bic, bwd_summary$bic[min_bic], col = "red", pch = 20, cex = 2)
+
+# Plot of variables selected
+plot(bwd_selection, scale = "adjr2")   # distance, cab_type, Cab_Name, surge_multiplier, Weather (no Rainy), windSpeed
+plot(bwd_selection, scale = "bic")  # distance, cab_type, Cab_Name, surge_multiplier
+plot(bwd_selection, scale = "Cp") # distance, cab_type, Cab_Name, surge_multiplier
+
+# The chosen model
+coef(bwd_selection, 7)  # based on adjusted R^2
+coef(bwd_selection, 5)  # based on bic
+coef(bwd_selection, 4)  # based on Cp
+```
+
+# Perform stepwise selection algorithm using AIC
+
+```{r}
+null_mod <- lm(price ~ 1, data = data)
+full_mod <- lm(price ~ ., data = data)
+
+# Forward selection
+fwd_step_selection <- step(object = null_mod, 
+                           scope = list(lower = null_mod, upper = full_mod),
+                           direction = "forward", trace = 0)
+summary(fwd_step_selection)  # Cab_Name, distance, surge_multiplier, cab_type
+plot(fwd_step_selection)
+
+# Backward selection
+bwd_step_selection <- step(object = full_mod, 
+                           scope = list(lower = null_mod, upper = full_mod),
+                           direction = "backward")
+summary(bwd_step_selection)  # Cab_Name, distance, surge_multiplier, cab_type
+
+# Both direction
+both_step_selection <- step(object = null_mod, 
+                           scope = list(lower = null_mod, upper = full_mod),
+                           direction = "both")
+summary(both_step_selection)  # Cab_Name, distance, surge_multiplier, cab_type
+```
+
+
+# Perform best subset selection
+Since the adjusted R^2 suggests the inclusion of `Weather` and `windSpeed`, we will test whether these are worth including in the model or not. We will also check on our intuition with `Peak` as well.
+
+```{r}
+best_mod <- regsubsets(price ~ Cab_Name + distance + surge_multiplier + cab_type + Weather + windSpeed + Peak, data = data)
+
+par(mfrow = c(1,2))
+plot(best_mod, scale = "adjr2")
+plot(best_mod, scale = "bic")
+
+coef(best_mod, 7)
+coef(best_mod, 5)
+```
+
+# Intermediary conclusion
+
+The base model should include `Cab_Name`, `distance`, `surge_multiplier` and `cab_type` as predictors for `price`. We will run an ANOVA to assess whether `Weather` and `windSpeed` are worth including or not.
+
+```{r}
+base_mod <- lm(price ~ Cab_Name + distance + surge_multiplier + cab_type, data = data)
+anova(base_mod)
+summary(base_mod)   # 73.84% adjusted R^2
+
+weather_mod <- lm(price ~ Cab_Name + distance + surge_multiplier + cab_type + Weather + Weather*surge_multiplier, data = data)  # interaction term between weather & distace / surge_multiplier is significant
+anova(weather_mod)
+summary(weather_mod)  # same adjusted R^2 even with the interaction term
+
+wind_mod <- lm(price ~ Cab_Name + distance + surge_multiplier + cab_type + windSpeed + windSpeed*distance, data = data)   # even including the interaction term doesn't make windSpeed significant
+anova(wind_mod)
+
+combo_mod <- lm(price ~ Cab_Name + distance + surge_multiplier + cab_type + Weather + windSpeed + Weather*windSpeed, data = data)   # the added variables are not significant
+anova(combo_mod)
+```
+
+# Final conclusion
+Discard `windSpeed` and `Peak`. We will keep `Weather` for the next analysis on fitting the model.
